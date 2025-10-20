@@ -1,8 +1,13 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
+from contextlib import ExitStack
 import os
 from typing import Optional
-import pkg_resources
+import sys
 import torch
+if sys.version_info < (3, 9):
+    import importlib_resources as resources
+else:
+    import importlib.resources as resources
 
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import CfgNode, LazyConfig, get_cfg, instantiate
@@ -125,6 +130,29 @@ def get_checkpoint_url(config_path):
     return url
 
 
+def reimplemented_resource_filename(package_name, resource_name):
+    """
+    Reimplements pkg_resources.resource_filename using importlib.resources.
+
+    Args:
+        package_name (str): The name of the package containing the resource.
+        resource_name (str): The path to the resource relative to the package.
+
+    Returns:
+        str: The filesystem path to the resource.
+    """
+    # Get a Traversable object representing the resource
+    resource_path = resources.files(package_name).joinpath(resource_name)
+
+    # Use as_file to get a temporary file path if the resource is in an archive
+    # or directly get the path if it's a regular file.
+    # We use ExitStack to manage the context manager returned by as_file
+    # in case the resource needs to be extracted.
+    with ExitStack() as stack:
+        file_path = stack.enter_context(resources.as_file(resource_path))
+        return str(file_path)
+
+
 def get_config_file(config_path):
     """
     Returns path to a builtin config file.
@@ -136,7 +164,7 @@ def get_config_file(config_path):
     Returns:
         str: the real path to the config file.
     """
-    cfg_file = pkg_resources.resource_filename(
+    cfg_file = reimplemented_resource_filename(
         "detectron2.model_zoo", os.path.join("configs", config_path)
     )
     if not os.path.exists(cfg_file):
